@@ -5,6 +5,24 @@ configuration:
   google_art: 
     name: Google Art
     description: Download a random image from Google Art
+  google_color:
+    name: Google Art color
+    description: Fallback color when no Home Assistant color helper is available
+  google_color_entity:
+    name: Color helper
+    description: Home Assistant input_select entity for the color filter
+  google_museum:
+    name: Google Art museum
+    description: Fallback museum when no Home Assistant museum helper is available
+  google_museum_entity:
+    name: Museum helper
+    description: Home Assistant input_select entity for the museum filter
+  google_style:
+    name: Google Art style or period
+    description: Fallback style when no Home Assistant style helper is available
+  google_style_entity:
+    name: Style helper
+    description: Home Assistant input_select entity for the style or period filter
   download_high_res: 
     name: High Res 
     description: Get high res image from Google Art using dezoomify
