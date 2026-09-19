@@ -9,3 +9,4 @@
 - Publish the processed TV image atomically as `/media/frame/latest.jpg`.
 - Add progressive catalog caching with bounded storage.
 - Add filter tests, translated configuration labels, and dashboard documentation.
+- Preserve the complete artwork and add black borders when its aspect ratio is not 16:9.

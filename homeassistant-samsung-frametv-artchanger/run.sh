@@ -40,6 +40,9 @@ fi
 if bashio::config.true 'media_folder'; then
     PARAMS="${PARAMS} --media-folder"
 fi
+if bashio::config.true 'preserve_aspect_ratio'; then
+    PARAMS="${PARAMS} --preserve-aspect-ratio"
+fi
 if bashio::config.true 'download_high_res'; then
     PARAMS="${PARAMS} --download-high-res"
 fi

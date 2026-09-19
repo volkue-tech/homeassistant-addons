@@ -67,6 +67,17 @@ class GoogleArtFilterTests(unittest.TestCase):
         )
         self.assertEqual(candidates, ["https://example/red-new"])
 
+    def test_asset_page_parser_keeps_original_image_url(self):
+        parser = google_art.GoogleAssetImageParser()
+        parser.feed(
+            '<html><head><meta property="og:image" '
+            'content="https://lh3.googleusercontent.com/example"></head></html>'
+        )
+        self.assertEqual(
+            parser.image_url,
+            "https://lh3.googleusercontent.com/example",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

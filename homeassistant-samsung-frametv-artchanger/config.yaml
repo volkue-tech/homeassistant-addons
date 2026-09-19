@@ -27,6 +27,7 @@ options:
   download_high_res: true
   bing_wallpapers: false
   media_folder: false
+  preserve_aspect_ratio: true
   same_image: false
 schema:
   tv: "str?"
@@ -40,5 +41,6 @@ schema:
   download_high_res: "bool?"
   bing_wallpapers: "bool?"
   media_folder: "bool?"
+  preserve_aspect_ratio: "bool?"
   same_image: "bool?"
 image: vivalatech/{arch}-addon-homeassistant-samsung-frametv-artchanger

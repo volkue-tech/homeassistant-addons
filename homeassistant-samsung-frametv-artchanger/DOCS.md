@@ -12,6 +12,10 @@ TV, and stops after one successful run. It supports:
 The app downloads and sends only one artwork per run. Its one-shot startup mode
 is intentional: a Home Assistant script starts it whenever a new work is wanted.
 
+By default, **Preserve complete artwork** is enabled. Images that are not 16:9
+are centered on a black 16:9 canvas, so no part of the artwork is cropped. Turn
+the option off only if you prefer the older edge-to-edge center crop.
+
 ## Installation
 
 1. Add `https://github.com/vivalatech/homeassistant-addons` to the Home

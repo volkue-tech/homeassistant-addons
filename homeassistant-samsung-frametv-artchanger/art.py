@@ -28,6 +28,7 @@ parser.add_argument('--google-style-entity', help='Home Assistant input_select e
 parser.add_argument('--download-high-res', action='store_true', help='Download high resolution image using dezoomify-rs')
 parser.add_argument('--bing-wallpapers', action='store_true', help='Download and upload image from Bing Wallpapers')
 parser.add_argument('--media-folder', action='store_true', help='Use images from the local media folder')
+parser.add_argument('--preserve-aspect-ratio', action='store_true', help='Fit the complete image on a black 16:9 canvas instead of cropping it')
 parser.add_argument('--debugimage', action='store_true', help='Save downloaded and resized images for inspection')
 
 args = parser.parse_args()
@@ -139,8 +140,12 @@ def get_image_for_tv(tv_ip: str):
 
     save_debug_image(image_data, f'debug_{selected_source.__name__}_original.jpg')
 
-    logging.info('Resizing and cropping the image...')
-    resized_image_data = utils.resize_and_crop_image(image_data)
+    if args.preserve_aspect_ratio:
+        logging.info('Fitting the complete image onto a black 16:9 canvas...')
+        resized_image_data = utils.resize_and_pad_image(image_data)
+    else:
+        logging.info('Filling the 16:9 canvas and cropping the image...')
+        resized_image_data = utils.resize_and_crop_image(image_data)
 
     save_debug_image(resized_image_data, f'debug_{selected_source.__name__}_resized.jpg')
 

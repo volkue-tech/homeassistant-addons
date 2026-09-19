@@ -182,6 +182,21 @@ class GoogleColorAssetParser(HTMLParser):
             self.container_depth -= 1
 
 
+class GoogleAssetImageParser(HTMLParser):
+    """Read the original-aspect image URL from a Google Arts asset page."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.image_url: Optional[str] = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "meta" or self.image_url:
+            return
+        attributes = dict(attrs)
+        if attributes.get("property") == "og:image":
+            self.image_url = attributes.get("content")
+
+
 def _normalize_color(value: Optional[str]) -> str:
     normalized = (value or "ANY").strip().upper()
     color = COLOR_ALIASES.get(normalized, normalized)
@@ -534,6 +549,19 @@ def _filter_catalog_candidates(catalog: Dict, color: str, excluded: Set[str]) ->
     ]
 
 
+def _resolve_download_base_url(image_url: str) -> str:
+    if "artsandculture.google.com/asset/" not in image_url:
+        return image_url
+
+    page_response = requests.get(image_url, headers=REQUEST_HEADERS, timeout=60)
+    page_response.raise_for_status()
+    parser = GoogleAssetImageParser()
+    parser.feed(page_response.text)
+    if not parser.image_url:
+        raise ValueError("Google Arts asset page has no og:image URL")
+    return parser.image_url
+
+
 def get_image_url(args, excluded_urls=None):
     helper_color = _read_helper(getattr(args, "google_color_entity", None), "color")
     helper_museum = _read_helper(getattr(args, "google_museum_entity", None), "museum")
@@ -607,7 +635,11 @@ def get_image(args, image_url) -> Tuple[Optional[BytesIO], Optional[str]]:
             return None, None
 
     try:
-        download_url = image_url + "=w3840-h2160-c"
+        download_base_url = _resolve_download_base_url(image_url)
+        if getattr(args, "preserve_aspect_ratio", False):
+            download_url = download_base_url + "=w3840"
+        else:
+            download_url = download_base_url + "=w3840-h2160-c"
         logging.info("Downloading image from %s", download_url)
         image_response = requests.get(download_url, timeout=60)
         image_response.raise_for_status()
