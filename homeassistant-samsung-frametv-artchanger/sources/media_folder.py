@@ -2,7 +2,7 @@ import os
 import logging
 import random
 from io import BytesIO
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Set
 
 folder_path = '/media/frame'
 
@@ -13,16 +13,30 @@ def get_media_folder_images() -> List[str]:
         for root, dirs, files in os.walk(folder_path)
         for filename in files
         if filename.lower().endswith(('.jpg', '.png'))
-        and filename != 'latest.jpg'
+        and filename.lower() != 'latest.jpg'
     ]
 
-def get_image_url(args):
+def get_image_url(args, excluded_urls: Optional[Set[str]] = None):
     files = get_media_folder_images()
     if not files:
         logging.info('No images found in the media folder.')
         return None
-    selected_file = random.choice(files)
-    return f"{os.path.basename(selected_file)}"
+
+    excluded_urls = excluded_urls or set()
+    candidates = [
+        (
+            selected_file,
+            os.path.relpath(selected_file, folder_path).replace(os.sep, '/'),
+        )
+        for selected_file in files
+    ]
+    candidates = [candidate for candidate in candidates if candidate[1] not in excluded_urls]
+    if not candidates:
+        logging.info('No unused images found in the media folder.')
+        return None
+
+    _, relative_path = random.choice(candidates)
+    return relative_path
 
 def get_image(args, image_url) -> Tuple[Optional[BytesIO], Optional[str]]:
     full_path = os.path.join(folder_path, image_url)

@@ -115,15 +115,14 @@ def get_image_for_tv(tv_ip: str):
     selected_source = random.choice(sources)
     logging.info(f'Selected source: {selected_source.__name__}')
 
-    if selected_source is google_art:
-        previously_sent_urls = {
-            item.get('file')
-            for item in uploaded_files
-            if isinstance(item, dict) and item.get('file')
-        }
-        image_url = selected_source.get_image_url(args, previously_sent_urls)
-    else:
-        image_url = selected_source.get_image_url(args)
+    previously_sent_urls = {
+        item.get('file')
+        for item in uploaded_files
+        if isinstance(item, dict)
+        and item.get('file')
+        and item.get('source') == selected_source.__name__
+    }
+    image_url = selected_source.get_image_url(args, previously_sent_urls)
 
     if not image_url:
         logging.error('No unused image is available from the selected source')
