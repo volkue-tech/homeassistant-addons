@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -77,6 +78,63 @@ class GoogleArtFilterTests(unittest.TestCase):
             parser.image_url,
             "https://lh3.googleusercontent.com/example",
         )
+
+    @mock.patch.object(google_art, "_save_orientation_cache")
+    @mock.patch.object(google_art, "_load_orientation_cache", return_value={})
+    @mock.patch.object(google_art.random, "shuffle")
+    @mock.patch.object(
+        google_art,
+        "_probe_asset_dimensions",
+        side_effect=[(600, 900), (1600, 900)],
+    )
+    def test_landscape_selector_skips_portrait_before_high_res_download(
+        self,
+        probe_dimensions,
+        _shuffle,
+        _load_cache,
+        save_cache,
+    ):
+        selected = google_art._select_landscape_candidate(
+            ["https://example/portrait", "https://example/landscape"]
+        )
+
+        self.assertEqual(selected, "https://example/landscape")
+        self.assertEqual(probe_dimensions.call_count, 2)
+        saved_cache = save_cache.call_args.args[0]
+        self.assertEqual(
+            saved_cache["https://example/portrait"]["orientation"],
+            "portrait_or_square",
+        )
+        self.assertEqual(
+            saved_cache["https://example/landscape"]["orientation"],
+            "landscape",
+        )
+
+    @mock.patch.object(google_art, "_save_orientation_cache")
+    @mock.patch.object(
+        google_art,
+        "_load_orientation_cache",
+        return_value={
+            "https://example/portrait": {"orientation": "portrait_or_square"},
+            "https://example/landscape": {"orientation": "landscape"},
+        },
+    )
+    @mock.patch.object(google_art.random, "shuffle")
+    @mock.patch.object(google_art, "_probe_asset_dimensions")
+    def test_landscape_selector_reuses_cached_orientation(
+        self,
+        probe_dimensions,
+        _shuffle,
+        _load_cache,
+        save_cache,
+    ):
+        selected = google_art._select_landscape_candidate(
+            ["https://example/portrait", "https://example/landscape"]
+        )
+
+        self.assertEqual(selected, "https://example/landscape")
+        probe_dimensions.assert_not_called()
+        save_cache.assert_not_called()
 
 
 if __name__ == "__main__":

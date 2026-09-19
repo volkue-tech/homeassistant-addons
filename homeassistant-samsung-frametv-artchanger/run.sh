@@ -34,6 +34,9 @@ if bashio::config.has_value 'google_style_entity'; then
     GOOGLE_STYLE_ENTITY=$(bashio::config 'google_style_entity')
     PARAMS="${PARAMS} --google-style-entity ${GOOGLE_STYLE_ENTITY}"
 fi
+if bashio::config.true 'google_landscape_only'; then
+    PARAMS="${PARAMS} --google-landscape-only"
+fi
 if bashio::config.true 'bing_wallpapers'; then
     PARAMS="${PARAMS} --bing-wallpapers"
 fi

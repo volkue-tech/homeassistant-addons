@@ -11,6 +11,7 @@ from io import BytesIO
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import requests
+from PIL import Image, UnidentifiedImageError
 
 
 COLOR_PAGE_URL = "https://artsandculture.google.com/color"
@@ -19,12 +20,15 @@ SEARCH_API_URL = "https://artsandculture.google.com/api/assets/images"
 DEFAULT_FEED_URL = "https://www.gstatic.com/culturalinstitute/tabext/imax_2_2.json"
 COLOR_CACHE_PATH = "/data/google_art_color_catalog.json"
 FILTER_CACHE_PATH = "/data/google_art_filter_catalog.json"
+ORIENTATION_CACHE_PATH = "/data/google_art_orientation_cache.json"
 COLOR_CACHE_TTL_SECONDS = 24 * 60 * 60
 FILTER_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
 FILTER_PAGE_SIZE = 24
 FILTER_PAGES_PER_BATCH = 10
 FILTER_MAX_ASSETS = 2400
+ORIENTATION_MAX_PROBES = 30
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (Home Assistant Frame Art Changer)"}
+_RESOLVED_IMAGE_URLS: Dict[str, str] = {}
 SUPPORTED_COLORS = {
     "BLUE",
     "GREEN",
@@ -366,6 +370,32 @@ def _save_filter_cache(cache: Dict) -> None:
             pass
 
 
+def _load_orientation_cache() -> Dict:
+    try:
+        with open(ORIENTATION_CACHE_PATH, "r", encoding="utf-8") as cache_file:
+            cache = json.load(cache_file)
+            return cache if isinstance(cache, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_orientation_cache(cache: Dict) -> None:
+    temporary_path = ORIENTATION_CACHE_PATH + ".tmp"
+    try:
+        os.makedirs(os.path.dirname(ORIENTATION_CACHE_PATH), exist_ok=True)
+        with open(temporary_path, "w", encoding="utf-8") as cache_file:
+            json.dump(cache, cache_file, ensure_ascii=False)
+            cache_file.flush()
+            os.fsync(cache_file.fileno())
+        os.replace(temporary_path, ORIENTATION_CACHE_PATH)
+    except OSError as error:
+        logging.warning("Could not save Google Art orientation cache: %s", error)
+        try:
+            os.remove(temporary_path)
+        except FileNotFoundError:
+            pass
+
+
 def _parse_assets_query(query) -> Tuple[List[Dict[str, Optional[str]]], int, Optional[str]]:
     if not isinstance(query, list) or len(query) < 5:
         raise ValueError("Invalid Google Art AssetsQuery")
@@ -550,6 +580,10 @@ def _filter_catalog_candidates(catalog: Dict, color: str, excluded: Set[str]) ->
 
 
 def _resolve_download_base_url(image_url: str) -> str:
+    cached_url = _RESOLVED_IMAGE_URLS.get(image_url)
+    if cached_url:
+        return cached_url
+
     if "artsandculture.google.com/asset/" not in image_url:
         return image_url
 
@@ -559,7 +593,77 @@ def _resolve_download_base_url(image_url: str) -> str:
     parser.feed(page_response.text)
     if not parser.image_url:
         raise ValueError("Google Arts asset page has no og:image URL")
+    _RESOLVED_IMAGE_URLS[image_url] = parser.image_url
     return parser.image_url
+
+
+def _probe_asset_dimensions(image_url: str) -> Tuple[int, int]:
+    """Read a small Google preview to determine the original orientation."""
+    download_base_url = _resolve_download_base_url(image_url)
+    response = requests.get(
+        download_base_url + "=w320",
+        headers=REQUEST_HEADERS,
+        timeout=30,
+    )
+    response.raise_for_status()
+    try:
+        with Image.open(BytesIO(response.content)) as image:
+            return image.width, image.height
+    except (UnidentifiedImageError, OSError) as error:
+        raise ValueError("Google Art preview is not a readable image") from error
+
+
+def _select_landscape_candidate(candidates: List[str]) -> Optional[str]:
+    """Choose a landscape work, caching orientation without caching images."""
+    randomized_candidates = list(candidates)
+    random.shuffle(randomized_candidates)
+    cache = _load_orientation_cache()
+    changed = False
+    probes = 0
+
+    for image_url in randomized_candidates:
+        cached = cache.get(image_url)
+        if isinstance(cached, dict):
+            orientation = cached.get("orientation")
+            if orientation == "landscape":
+                if changed:
+                    _save_orientation_cache(cache)
+                return image_url
+            if orientation == "portrait_or_square":
+                continue
+
+        if probes >= ORIENTATION_MAX_PROBES:
+            continue
+        probes += 1
+
+        try:
+            width, height = _probe_asset_dimensions(image_url)
+        except (requests.RequestException, ValueError) as error:
+            logging.warning("Could not determine artwork orientation for %s: %s", image_url, error)
+            continue
+
+        orientation = "landscape" if width > height else "portrait_or_square"
+        cache[image_url] = {
+            "orientation": orientation,
+            "width": width,
+            "height": height,
+            "checked_at": int(time.time()),
+        }
+        changed = True
+        logging.info(
+            "Google Art orientation for %s: %s (%dx%d)",
+            image_url,
+            orientation,
+            width,
+            height,
+        )
+        if orientation == "landscape":
+            _save_orientation_cache(cache)
+            return image_url
+
+    if changed:
+        _save_orientation_cache(cache)
+    return None
 
 
 def get_image_url(args, excluded_urls=None):
@@ -605,6 +709,14 @@ def get_image_url(args, excluded_urls=None):
             len(candidates),
             total,
         )
+        if getattr(args, "google_landscape_only", False):
+            selected = _select_landscape_candidate(candidates)
+            if not selected:
+                logging.error(
+                    "No unused landscape Google Art work was found after checking up to %d new candidates",
+                    ORIENTATION_MAX_PROBES,
+                )
+            return selected
         return random.choice(candidates)
     except (requests.RequestException, ValueError, KeyError, IndexError, json.JSONDecodeError) as error:
         logging.error("Error getting image URL: %s", error)

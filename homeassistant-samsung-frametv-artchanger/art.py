@@ -25,6 +25,7 @@ parser.add_argument('--google-museum', default='ANY', help='Google Arts & Cultur
 parser.add_argument('--google-museum-entity', help='Home Assistant input_select entity containing the museum filter')
 parser.add_argument('--google-style', default='ANY', help='Google Arts & Culture style or period filter')
 parser.add_argument('--google-style-entity', help='Home Assistant input_select entity containing the style filter')
+parser.add_argument('--google-landscape-only', action='store_true', help='Skip portrait and square Google Arts & Culture works')
 parser.add_argument('--download-high-res', action='store_true', help='Download high resolution image using dezoomify-rs')
 parser.add_argument('--bing-wallpapers', action='store_true', help='Download and upload image from Bing Wallpapers')
 parser.add_argument('--media-folder', action='store_true', help='Use images from the local media folder')

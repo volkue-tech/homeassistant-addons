@@ -23,6 +23,9 @@ configuration:
   google_style_entity:
     name: Style helper
     description: Home Assistant input_select entity for the style or period filter
+  google_landscape_only:
+    name: Landscape artworks only
+    description: Skip portrait and square Google Art works before downloading the high-resolution image
   download_high_res: 
     name: High Res 
     description: Get high res image from Google Art using dezoomify

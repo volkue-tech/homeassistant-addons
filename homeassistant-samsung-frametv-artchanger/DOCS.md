@@ -6,6 +6,7 @@ TV, and stops after one successful run. It supports:
 - an atomic dashboard preview at `/media/frame/latest.jpg`;
 - persistent duplicate prevention in `/media/frame/uploaded_files.json`;
 - Google Arts & Culture filters for color, museum, and style/period;
+- a landscape-only Google Art filter enabled by default;
 - exact Google-side combinations for museum plus style;
 - progressive, compact catalog caching in the app's private `/data` directory.
 
@@ -15,6 +16,12 @@ is intentional: a Home Assistant script starts it whenever a new work is wanted.
 By default, **Preserve complete artwork** is enabled. Images that are not 16:9
 are centered on a black 16:9 canvas, so no part of the artwork is cropped. Turn
 the option off only if you prefer the older edge-to-edge center crop.
+
+By default, **Landscape artworks only** is also enabled for Google Art. The app
+checks a small preview before the high-resolution download and skips portrait
+and square works. Detected orientations are cached in `/data` without storing
+the preview image. Disable the option if you want every orientation to remain
+eligible.
 
 ## Installation
 
@@ -82,6 +89,7 @@ google_museum: ANY
 google_museum_entity: input_select.samsung_frame_museum
 google_style: ANY
 google_style_entity: input_select.samsung_frame_stil
+google_landscape_only: true
 ```
 
 If a helper is unavailable, its `ANY` fallback means no restriction for that
