@@ -26,9 +26,12 @@ eligible.
 Enable **Borderless TV format only** to accept only landscape Google Art close
 enough to 16:9 that filling the screen removes no more than about 5% from each
 affected edge. The accepted work is then fitted to exactly 3840x2160 without
-black borders. This stricter option takes precedence over **Preserve complete
-artwork**. It is disabled by default because truly exact 16:9 museum works are
-rare.
+black borders. If no such work is found within 30 new dimension checks or 60
+seconds, the app falls back to a landscape work on a black 16:9 canvas when
+both **Preserve complete artwork** and **Landscape artworks only** are enabled.
+If even that fallback is unavailable, the app stops cleanly and leaves the
+current TV image unchanged. The stricter option is disabled by default because
+truly exact 16:9 museum works are rare.
 
 ## Installation
 

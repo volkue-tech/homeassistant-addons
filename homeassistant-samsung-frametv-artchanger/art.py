@@ -77,12 +77,19 @@ preview_path = '/media/frame/latest.jpg'
 utils = Utils(args.tvip, uploaded_files)
 
 def process_tv(tv_ip: str, image_data: BytesIO, file_type: str, image_url: str, remote_filename: str, source_name: str):
+    if not image_url or not source_name:
+        logging.warning(f'No artwork was selected for TV at {tv_ip}; leaving the current image unchanged')
+        return False
+    if image_data is None and remote_filename is None:
+        logging.warning(f'No image data is available for TV at {tv_ip}; leaving the current image unchanged')
+        return False
+
     tv = SamsungTVWS(tv_ip)
     
     # Check if TV supports art mode
     if not tv.art().supported():
         logging.warning(f'TV at {tv_ip} does not support art mode.')
-        return
+        return False
 
     if remote_filename is None:
         try:
@@ -104,14 +111,18 @@ def process_tv(tv_ip: str, image_data: BytesIO, file_type: str, image_url: str, 
             # Save the list of uploaded filenames to the file
             with open(upload_list_path, 'w') as f:
                 json.dump(uploaded_files, f)
+            return True
         except Exception as e:
             logging.error(f'There was an error uploading the image to TV at {tv_ip}: ' + str(e))
+            return False
     else:
         if not args.upload_all:
             # Select the image using the remote file name only if not in 'upload-all' mode
             logging.info(f'Setting existing image on TV at {tv_ip}, skipping upload')
             tv.art().select_image(remote_filename, show=True)
             save_preview_image(image_data)
+            return True
+    return False
 
 def get_image_for_tv(tv_ip: str):
     selected_source = random.choice(sources)
@@ -141,7 +152,11 @@ def get_image_for_tv(tv_ip: str):
 
     save_debug_image(image_data, f'debug_{selected_source.__name__}_original.jpg')
 
-    if selected_source is google_art and args.google_tv_format_only:
+    if (
+        selected_source is google_art
+        and args.google_tv_format_only
+        and not getattr(args, '_google_preserve_aspect_fallback', False)
+    ):
         logging.info('Filling the 16:9 TV canvas with a dimension-filtered artwork...')
         resized_image_data = utils.resize_and_crop_image(image_data)
     elif args.preserve_aspect_ratio:
@@ -181,15 +196,35 @@ def save_debug_image(image_data: BytesIO, filename: str) -> None:
             f.write(image_data.getvalue())
         logging.info(f'Debug image saved as {filename}')
 
+changed_tv = False
+
 if tvip:
     if len(tvip) > 1 and use_same_image:
         image_data, file_type, image_url, remote_filename, source_name = get_image_for_tv(None)
-        for tv_ip in tvip:
-            process_tv(tv_ip, image_data, file_type, image_url, remote_filename, source_name)
+        if image_url:
+            for tv_ip in tvip:
+                changed_tv = process_tv(
+                    tv_ip,
+                    image_data,
+                    file_type,
+                    image_url,
+                    remote_filename,
+                    source_name,
+                ) or changed_tv
     else:
         for tv_ip in tvip:
             image_data, file_type, image_url, remote_filename, source_name = get_image_for_tv(tv_ip)
-            process_tv(tv_ip, image_data, file_type, image_url, remote_filename, source_name)
+            if image_url:
+                changed_tv = process_tv(
+                    tv_ip,
+                    image_data,
+                    file_type,
+                    image_url,
+                    remote_filename,
+                    source_name,
+                ) or changed_tv
+    if not changed_tv:
+        logging.warning('Finished without changing the TV because no usable artwork was available')
 else:
     logging.error('No TV IP addresses specified. Please use --tvip')
     sys.exit(1)
