@@ -172,6 +172,54 @@ class GoogleArtFilterTests(unittest.TestCase):
         self.assertEqual(selected, "https://example/sixteen-by-nine")
         self.assertEqual(probe_dimensions.call_count, 3)
 
+    @mock.patch.object(
+        google_art,
+        "_select_dimension_candidate",
+        side_effect=[None, "https://example/landscape-fallback"],
+    )
+    def test_tv_format_falls_back_to_landscape_when_aspect_is_preserved(self, select):
+        args = SimpleNamespace(
+            google_tv_format_only=True,
+            google_landscape_only=True,
+            preserve_aspect_ratio=True,
+        )
+        selected = google_art._select_candidate_for_dimensions(
+            ["https://example/artwork"],
+            args,
+        )
+
+        self.assertEqual(selected, "https://example/landscape-fallback")
+        self.assertTrue(args._google_preserve_aspect_fallback)
+        self.assertEqual(select.call_count, 2)
+        self.assertTrue(select.call_args_list[0].kwargs["tv_format_only"])
+        self.assertFalse(select.call_args_list[1].kwargs["tv_format_only"])
+        self.assertIs(
+            select.call_args_list[0].kwargs["probe_budget"],
+            select.call_args_list[1].kwargs["probe_budget"],
+        )
+        self.assertEqual(
+            select.call_args_list[0].kwargs["deadline"],
+            select.call_args_list[1].kwargs["deadline"],
+        )
+
+    @mock.patch.object(
+        google_art,
+        "_select_dimension_candidate",
+        return_value=None,
+    )
+    def test_tv_format_without_permitted_fallback_ends_cleanly(self, select):
+        selected = google_art._select_candidate_for_dimensions(
+            ["https://example/artwork"],
+            SimpleNamespace(
+                google_tv_format_only=True,
+                google_landscape_only=True,
+                preserve_aspect_ratio=False,
+            ),
+        )
+
+        self.assertIsNone(selected)
+        select.assert_called_once()
+
     def test_failed_high_res_download_removes_temporary_file(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             output_path = Path(temporary_directory, "frame-art-test.jpg")
