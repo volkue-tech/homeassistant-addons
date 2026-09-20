@@ -23,6 +23,13 @@ and square works. Detected orientations are cached in `/data` without storing
 the preview image. Disable the option if you want every orientation to remain
 eligible.
 
+Enable **Borderless TV format only** to accept only landscape Google Art close
+enough to 16:9 that filling the screen removes no more than about 5% from each
+affected edge. The accepted work is then fitted to exactly 3840x2160 without
+black borders. This stricter option takes precedence over **Preserve complete
+artwork**. It is disabled by default because truly exact 16:9 museum works are
+rare.
+
 ## Installation
 
 1. Add `https://github.com/vivalatech/homeassistant-addons` to the Home
@@ -90,6 +97,7 @@ google_museum_entity: input_select.samsung_frame_museum
 google_style: ANY
 google_style_entity: input_select.samsung_frame_stil
 google_landscape_only: true
+google_tv_format_only: false
 ```
 
 If a helper is unavailable, its `ANY` fallback means no restriction for that

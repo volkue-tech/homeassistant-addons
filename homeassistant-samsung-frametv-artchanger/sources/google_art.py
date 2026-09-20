@@ -4,6 +4,7 @@ import os
 import random
 import re
 import subprocess
+import tempfile
 import time
 import colorsys
 from html.parser import HTMLParser
@@ -27,6 +28,10 @@ FILTER_PAGE_SIZE = 24
 FILTER_PAGES_PER_BATCH = 10
 FILTER_MAX_ASSETS = 2400
 ORIENTATION_MAX_PROBES = 30
+TV_FORMAT_MAX_PROBES = 60
+TV_ASPECT_RATIO = 16 / 9
+TV_ASPECT_RELATIVE_TOLERANCE = 0.10
+ORIENTATION_CACHE_MAX_ENTRIES = 5000
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0 (Home Assistant Frame Art Changer)"}
 _RESOLVED_IMAGE_URLS: Dict[str, str] = {}
 SUPPORTED_COLORS = {
@@ -380,6 +385,16 @@ def _load_orientation_cache() -> Dict:
 
 
 def _save_orientation_cache(cache: Dict) -> None:
+    if len(cache) > ORIENTATION_CACHE_MAX_ENTRIES:
+        newest = sorted(
+            cache.items(),
+            key=lambda item: (
+                item[1].get("checked_at", 0) if isinstance(item[1], dict) else 0
+            ),
+            reverse=True,
+        )[:ORIENTATION_CACHE_MAX_ENTRIES]
+        cache = dict(newest)
+
     temporary_path = ORIENTATION_CACHE_PATH + ".tmp"
     try:
         os.makedirs(os.path.dirname(ORIENTATION_CACHE_PATH), exist_ok=True)
@@ -613,26 +628,57 @@ def _probe_asset_dimensions(image_url: str) -> Tuple[int, int]:
         raise ValueError("Google Art preview is not a readable image") from error
 
 
-def _select_landscape_candidate(candidates: List[str]) -> Optional[str]:
-    """Choose a landscape work, caching orientation without caching images."""
+def _matches_tv_format(width: int, height: int) -> bool:
+    """Accept landscape art requiring at most a small crop to fill 16:9."""
+    if width <= height or height <= 0:
+        return False
+    aspect_ratio = width / height
+    relative_difference = abs(aspect_ratio - TV_ASPECT_RATIO) / TV_ASPECT_RATIO
+    return relative_difference <= TV_ASPECT_RELATIVE_TOLERANCE
+
+
+def _cached_dimensions(entry) -> Optional[Tuple[int, int]]:
+    if not isinstance(entry, dict):
+        return None
+    width = entry.get("width")
+    height = entry.get("height")
+    if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+        return width, height
+    return None
+
+
+def _select_dimension_candidate(
+    candidates: List[str],
+    tv_format_only: bool = False,
+) -> Optional[str]:
+    """Choose a dimension match, caching metadata without caching images."""
     randomized_candidates = list(candidates)
     random.shuffle(randomized_candidates)
     cache = _load_orientation_cache()
     changed = False
     probes = 0
+    max_probes = TV_FORMAT_MAX_PROBES if tv_format_only else ORIENTATION_MAX_PROBES
 
     for image_url in randomized_candidates:
         cached = cache.get(image_url)
-        if isinstance(cached, dict):
-            orientation = cached.get("orientation")
-            if orientation == "landscape":
+        dimensions = _cached_dimensions(cached)
+        if dimensions:
+            width, height = dimensions
+            matches = _matches_tv_format(width, height) if tv_format_only else width > height
+            if matches:
                 if changed:
                     _save_orientation_cache(cache)
                 return image_url
-            if orientation == "portrait_or_square":
+            continue
+        if not tv_format_only and isinstance(cached, dict):
+            if cached.get("orientation") == "landscape":
+                if changed:
+                    _save_orientation_cache(cache)
+                return image_url
+            if cached.get("orientation") == "portrait_or_square":
                 continue
 
-        if probes >= ORIENTATION_MAX_PROBES:
+        if probes >= max_probes:
             continue
         probes += 1
 
@@ -657,7 +703,8 @@ def _select_landscape_candidate(candidates: List[str]) -> Optional[str]:
             width,
             height,
         )
-        if orientation == "landscape":
+        matches = _matches_tv_format(width, height) if tv_format_only else width > height
+        if matches:
             _save_orientation_cache(cache)
             return image_url
 
@@ -709,12 +756,14 @@ def get_image_url(args, excluded_urls=None):
             len(candidates),
             total,
         )
-        if getattr(args, "google_landscape_only", False):
-            selected = _select_landscape_candidate(candidates)
+        tv_format_only = getattr(args, "google_tv_format_only", False)
+        if tv_format_only or getattr(args, "google_landscape_only", False):
+            selected = _select_dimension_candidate(candidates, tv_format_only=tv_format_only)
             if not selected:
                 logging.error(
-                    "No unused landscape Google Art work was found after checking up to %d new candidates",
-                    ORIENTATION_MAX_PROBES,
+                    "No unused %s Google Art work was found after checking up to %d new candidates",
+                    "TV-format" if tv_format_only else "landscape",
+                    TV_FORMAT_MAX_PROBES if tv_format_only else ORIENTATION_MAX_PROBES,
                 )
             return selected
         return random.choice(candidates)
@@ -729,7 +778,13 @@ def get_image(args, image_url) -> Tuple[Optional[BytesIO], Optional[str]]:
 
     if args.download_high_res:
         logging.info("Downloading high-res image from %s", image_url)
-        output_file = "temp.jpg"
+        descriptor, output_file = tempfile.mkstemp(
+            prefix="frame-art-",
+            suffix=".jpg",
+            dir="/tmp",
+        )
+        os.close(descriptor)
+        os.remove(output_file)
         try:
             subprocess.run(
                 ["dezoomify-rs", "--max-width", "5001", "--compression", "0", image_url, output_file],
@@ -737,14 +792,20 @@ def get_image(args, image_url) -> Tuple[Optional[BytesIO], Optional[str]]:
             )
             with open(output_file, "rb") as image_file:
                 image_data = BytesIO(image_file.read())
-            os.remove(output_file)
             return image_data, "JPEG"
         except subprocess.CalledProcessError as error:
             logging.error("Failed to download high-res image: %s", error)
             return None, None
         except OSError as error:
-            logging.error("Failed to read or remove temporary file: %s", error)
+            logging.error("Failed to read temporary image: %s", error)
             return None, None
+        finally:
+            try:
+                os.remove(output_file)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                logging.warning("Could not remove temporary image %s: %s", output_file, error)
 
     try:
         download_base_url = _resolve_download_base_url(image_url)

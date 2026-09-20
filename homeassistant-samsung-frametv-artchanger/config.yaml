@@ -25,6 +25,7 @@ options:
   google_style: "ANY"
   google_style_entity: "input_select.samsung_frame_stil"
   google_landscape_only: true
+  google_tv_format_only: false
   download_high_res: true
   bing_wallpapers: false
   media_folder: false
@@ -40,6 +41,7 @@ schema:
   google_style: "str?"
   google_style_entity: "str?"
   google_landscape_only: "bool?"
+  google_tv_format_only: "bool?"
   download_high_res: "bool?"
   bing_wallpapers: "bool?"
   media_folder: "bool?"

@@ -37,6 +37,9 @@ fi
 if bashio::config.true 'google_landscape_only'; then
     PARAMS="${PARAMS} --google-landscape-only"
 fi
+if bashio::config.true 'google_tv_format_only'; then
+    PARAMS="${PARAMS} --google-tv-format-only"
+fi
 if bashio::config.true 'bing_wallpapers'; then
     PARAMS="${PARAMS} --bing-wallpapers"
 fi

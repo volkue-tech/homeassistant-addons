@@ -26,6 +26,7 @@ parser.add_argument('--google-museum-entity', help='Home Assistant input_select 
 parser.add_argument('--google-style', default='ANY', help='Google Arts & Culture style or period filter')
 parser.add_argument('--google-style-entity', help='Home Assistant input_select entity containing the style filter')
 parser.add_argument('--google-landscape-only', action='store_true', help='Skip portrait and square Google Arts & Culture works')
+parser.add_argument('--google-tv-format-only', action='store_true', help='Use only landscape Google Art close enough to 16:9 for a small edge crop')
 parser.add_argument('--download-high-res', action='store_true', help='Download high resolution image using dezoomify-rs')
 parser.add_argument('--bing-wallpapers', action='store_true', help='Download and upload image from Bing Wallpapers')
 parser.add_argument('--media-folder', action='store_true', help='Use images from the local media folder')
@@ -140,7 +141,10 @@ def get_image_for_tv(tv_ip: str):
 
     save_debug_image(image_data, f'debug_{selected_source.__name__}_original.jpg')
 
-    if args.preserve_aspect_ratio:
+    if selected_source is google_art and args.google_tv_format_only:
+        logging.info('Filling the 16:9 TV canvas with a dimension-filtered artwork...')
+        resized_image_data = utils.resize_and_crop_image(image_data)
+    elif args.preserve_aspect_ratio:
         logging.info('Fitting the complete image onto a black 16:9 canvas...')
         resized_image_data = utils.resize_and_pad_image(image_data)
     else:

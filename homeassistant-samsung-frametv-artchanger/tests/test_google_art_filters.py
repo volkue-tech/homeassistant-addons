@@ -1,7 +1,10 @@
 import json
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -94,7 +97,7 @@ class GoogleArtFilterTests(unittest.TestCase):
         _load_cache,
         save_cache,
     ):
-        selected = google_art._select_landscape_candidate(
+        selected = google_art._select_dimension_candidate(
             ["https://example/portrait", "https://example/landscape"]
         )
 
@@ -128,13 +131,69 @@ class GoogleArtFilterTests(unittest.TestCase):
         _load_cache,
         save_cache,
     ):
-        selected = google_art._select_landscape_candidate(
+        selected = google_art._select_dimension_candidate(
             ["https://example/portrait", "https://example/landscape"]
         )
 
         self.assertEqual(selected, "https://example/landscape")
         probe_dimensions.assert_not_called()
         save_cache.assert_not_called()
+
+    def test_tv_format_accepts_only_near_16_by_9_landscape(self):
+        self.assertTrue(google_art._matches_tv_format(1920, 1080))
+        self.assertTrue(google_art._matches_tv_format(1680, 1050))
+        self.assertFalse(google_art._matches_tv_format(1600, 1200))
+        self.assertFalse(google_art._matches_tv_format(1080, 1920))
+
+    @mock.patch.object(google_art, "_save_orientation_cache")
+    @mock.patch.object(google_art, "_load_orientation_cache", return_value={})
+    @mock.patch.object(google_art.random, "shuffle")
+    @mock.patch.object(
+        google_art,
+        "_probe_asset_dimensions",
+        side_effect=[(600, 900), (1600, 1200), (1920, 1080)],
+    )
+    def test_tv_format_selector_skips_portrait_and_four_by_three(
+        self,
+        probe_dimensions,
+        _shuffle,
+        _load_cache,
+        _save_cache,
+    ):
+        selected = google_art._select_dimension_candidate(
+            [
+                "https://example/portrait",
+                "https://example/four-by-three",
+                "https://example/sixteen-by-nine",
+            ],
+            tv_format_only=True,
+        )
+
+        self.assertEqual(selected, "https://example/sixteen-by-nine")
+        self.assertEqual(probe_dimensions.call_count, 3)
+
+    def test_failed_high_res_download_removes_temporary_file(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_path = Path(temporary_directory, "frame-art-test.jpg")
+
+            def fail_download(_command, check):
+                self.assertTrue(check)
+                output_path.write_bytes(b"partial")
+                raise google_art.subprocess.CalledProcessError(1, "dezoomify-rs")
+
+            with mock.patch.object(
+                google_art.tempfile,
+                "mkstemp",
+                return_value=(os.open(output_path, os.O_CREAT | os.O_RDWR), str(output_path)),
+            ), mock.patch.object(google_art.subprocess, "run", side_effect=fail_download):
+                image_data, file_type = google_art.get_image(
+                    SimpleNamespace(download_high_res=True),
+                    "https://example/artwork",
+                )
+
+            self.assertIsNone(image_data)
+            self.assertIsNone(file_type)
+            self.assertFalse(output_path.exists())
 
 
 if __name__ == "__main__":
