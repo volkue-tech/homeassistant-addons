@@ -28,7 +28,7 @@ configuration:
     description: Skip portrait and square Google Art works before downloading the high-resolution image
   google_tv_format_only:
     name: Borderless TV format only
-    description: Use only landscape Google Art close to 16:9 and crop no more than about 5 percent per affected edge
+    description: Prefer Google Art close to 16:9; fall back to preserved-aspect landscape art when enabled and no strict match is found
   download_high_res: 
     name: High Res 
     description: Get high res image from Google Art using dezoomify
