@@ -28,7 +28,9 @@ FILTER_PAGE_SIZE = 24
 FILTER_PAGES_PER_BATCH = 10
 FILTER_MAX_ASSETS = 2400
 ORIENTATION_MAX_PROBES = 30
-TV_FORMAT_MAX_PROBES = 60
+TV_FORMAT_MAX_PROBES = 30
+DIMENSION_SELECTION_TIMEOUT_SECONDS = 60
+DIMENSION_REQUEST_TIMEOUT_SECONDS = 10
 TV_ASPECT_RATIO = 16 / 9
 TV_ASPECT_RELATIVE_TOLERANCE = 0.10
 ORIENTATION_CACHE_MAX_ENTRIES = 5000
@@ -594,7 +596,20 @@ def _filter_catalog_candidates(catalog: Dict, color: str, excluded: Set[str]) ->
     ]
 
 
-def _resolve_download_base_url(image_url: str) -> str:
+def _remaining_request_timeout(deadline: Optional[float]) -> float:
+    """Keep each dimension request inside the selection's wall-clock budget."""
+    if deadline is None:
+        return DIMENSION_REQUEST_TIMEOUT_SECONDS
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Google Art dimension-selection deadline reached")
+    return max(0.5, min(DIMENSION_REQUEST_TIMEOUT_SECONDS, remaining))
+
+
+def _resolve_download_base_url(
+    image_url: str,
+    deadline: Optional[float] = None,
+) -> str:
     cached_url = _RESOLVED_IMAGE_URLS.get(image_url)
     if cached_url:
         return cached_url
@@ -602,7 +617,11 @@ def _resolve_download_base_url(image_url: str) -> str:
     if "artsandculture.google.com/asset/" not in image_url:
         return image_url
 
-    page_response = requests.get(image_url, headers=REQUEST_HEADERS, timeout=60)
+    page_response = requests.get(
+        image_url,
+        headers=REQUEST_HEADERS,
+        timeout=_remaining_request_timeout(deadline) if deadline is not None else 60,
+    )
     page_response.raise_for_status()
     parser = GoogleAssetImageParser()
     parser.feed(page_response.text)
@@ -612,13 +631,16 @@ def _resolve_download_base_url(image_url: str) -> str:
     return parser.image_url
 
 
-def _probe_asset_dimensions(image_url: str) -> Tuple[int, int]:
+def _probe_asset_dimensions(
+    image_url: str,
+    deadline: Optional[float] = None,
+) -> Tuple[int, int]:
     """Read a small Google preview to determine the original orientation."""
-    download_base_url = _resolve_download_base_url(image_url)
+    download_base_url = _resolve_download_base_url(image_url, deadline=deadline)
     response = requests.get(
         download_base_url + "=w320",
         headers=REQUEST_HEADERS,
-        timeout=30,
+        timeout=_remaining_request_timeout(deadline) if deadline is not None else 30,
     )
     response.raise_for_status()
     try:
@@ -650,6 +672,8 @@ def _cached_dimensions(entry) -> Optional[Tuple[int, int]]:
 def _select_dimension_candidate(
     candidates: List[str],
     tv_format_only: bool = False,
+    probe_budget: Optional[Dict[str, int]] = None,
+    deadline: Optional[float] = None,
 ) -> Optional[str]:
     """Choose a dimension match, caching metadata without caching images."""
     randomized_candidates = list(candidates)
@@ -680,11 +704,17 @@ def _select_dimension_candidate(
 
         if probes >= max_probes:
             continue
+        if probe_budget is not None and probe_budget.get("remaining", 0) <= 0:
+            continue
+        if deadline is not None and time.monotonic() >= deadline:
+            continue
         probes += 1
+        if probe_budget is not None:
+            probe_budget["remaining"] -= 1
 
         try:
-            width, height = _probe_asset_dimensions(image_url)
-        except (requests.RequestException, ValueError) as error:
+            width, height = _probe_asset_dimensions(image_url, deadline=deadline)
+        except (requests.RequestException, ValueError, TimeoutError) as error:
             logging.warning("Could not determine artwork orientation for %s: %s", image_url, error)
             continue
 
@@ -711,6 +741,67 @@ def _select_dimension_candidate(
     if changed:
         _save_orientation_cache(cache)
     return None
+
+
+def _select_candidate_for_dimensions(candidates: List[str], args) -> Optional[str]:
+    """Apply the strict format filter with a bounded landscape fallback."""
+    setattr(args, "_google_preserve_aspect_fallback", False)
+    tv_format_only = getattr(args, "google_tv_format_only", False)
+    landscape_only = getattr(args, "google_landscape_only", False)
+    if not tv_format_only and not landscape_only:
+        return random.choice(candidates)
+
+    deadline = time.monotonic() + DIMENSION_SELECTION_TIMEOUT_SECONDS
+    probe_budget = {"remaining": TV_FORMAT_MAX_PROBES}
+
+    if tv_format_only:
+        selected = _select_dimension_candidate(
+            candidates,
+            tv_format_only=True,
+            probe_budget=probe_budget,
+            deadline=deadline,
+        )
+        if selected:
+            return selected
+
+        checked = TV_FORMAT_MAX_PROBES - probe_budget["remaining"]
+        if getattr(args, "preserve_aspect_ratio", False) and landscape_only:
+            logging.warning(
+                "No TV-format Google Art work was found after checking %d new candidates; "
+                "falling back to landscape with preserved aspect ratio",
+                checked,
+            )
+            selected = _select_dimension_candidate(
+                candidates,
+                tv_format_only=False,
+                probe_budget=probe_budget,
+                deadline=deadline,
+            )
+            if selected:
+                setattr(args, "_google_preserve_aspect_fallback", True)
+                logging.info("Selected a landscape Google Art fallback with preserved aspect ratio")
+                return selected
+
+        logging.error(
+            "No unused Google Art work matched the TV format or permitted fallback "
+            "after checking %d new candidates",
+            checked,
+        )
+        return None
+
+    selected = _select_dimension_candidate(
+        candidates,
+        tv_format_only=False,
+        probe_budget=probe_budget,
+        deadline=deadline,
+    )
+    if not selected:
+        checked = TV_FORMAT_MAX_PROBES - probe_budget["remaining"]
+        logging.error(
+            "No unused landscape Google Art work was found after checking %d new candidates",
+            checked,
+        )
+    return selected
 
 
 def get_image_url(args, excluded_urls=None):
@@ -756,17 +847,7 @@ def get_image_url(args, excluded_urls=None):
             len(candidates),
             total,
         )
-        tv_format_only = getattr(args, "google_tv_format_only", False)
-        if tv_format_only or getattr(args, "google_landscape_only", False):
-            selected = _select_dimension_candidate(candidates, tv_format_only=tv_format_only)
-            if not selected:
-                logging.error(
-                    "No unused %s Google Art work was found after checking up to %d new candidates",
-                    "TV-format" if tv_format_only else "landscape",
-                    TV_FORMAT_MAX_PROBES if tv_format_only else ORIENTATION_MAX_PROBES,
-                )
-            return selected
-        return random.choice(candidates)
+        return _select_candidate_for_dimensions(candidates, args)
     except (requests.RequestException, ValueError, KeyError, IndexError, json.JSONDecodeError) as error:
         logging.error("Error getting image URL: %s", error)
         return None
